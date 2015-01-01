@@ -39,9 +39,16 @@ public class InputHandler implements KeyListener{
 			if(spaceIsPressed){
 				// fire only up to 5 bullets per second
 				long currentTime = System.currentTimeMillis();
-				if((currentTime - lastBulletTime) > 1000/5){
-					lastBulletTime = currentTime;
-					gameLogic.fireBullet();
+				if(status.getLevel() < GameSettings.LEVEL_TO_FASTER_BULLETS) {
+					if((currentTime - lastBulletTime) > 1000/GameSettings.BULLETS_PER_SECOND){
+						lastBulletTime = currentTime;
+						gameLogic.fireBullet();
+					}
+				} else {
+					if((currentTime - lastBulletTime) > 1000/GameSettings.BULLETS_PER_SECOND_FAST){
+						lastBulletTime = currentTime;
+						gameLogic.fireBullet();
+					}
 				}
 			}
 
@@ -66,6 +73,8 @@ public class InputHandler implements KeyListener{
 			if(rightIsPressed){
 				moveShipRight(ship, gameScreen.getWidth());
 			}
+			
+			// if b is pressed... UNLEASH BOMB (maybe)
 		}
 	}
 
@@ -182,6 +191,9 @@ public class InputHandler implements KeyListener{
 		e.consume();
 	}
 
+	/**
+	 * Not used.
+	 */
 	public void keyTyped(KeyEvent e) {
 		// not used
 	}

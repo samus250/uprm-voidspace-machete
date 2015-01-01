@@ -5,7 +5,7 @@ import java.awt.Rectangle;
 import rbadia.voidspace.main.GameScreen;
 
 /**
- * Represents a ship/space craft.
+ * Represents a player's ship/space craft.
  *
  */
 public class Ship extends Rectangle {

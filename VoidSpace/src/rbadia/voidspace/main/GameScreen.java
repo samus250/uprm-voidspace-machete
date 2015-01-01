@@ -7,6 +7,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
@@ -16,6 +17,9 @@ import javax.swing.JPanel;
 import rbadia.voidspace.graphics.GraphicsManager;
 import rbadia.voidspace.model.Asteroid;
 import rbadia.voidspace.model.Bullet;
+import rbadia.voidspace.model.ChuckNorris;
+import rbadia.voidspace.model.EnemyBullet;
+import rbadia.voidspace.model.EnemyShip;
 import rbadia.voidspace.model.Ship;
 import rbadia.voidspace.sounds.SoundManager;
 
@@ -28,17 +32,20 @@ public class GameScreen extends JPanel {
 	private BufferedImage backBuffer;
 	private Graphics2D g2d;
 	
-	private static final int NEW_SHIP_DELAY = 500;
-	private static final int NEW_ASTEROID_DELAY = 500;
-	
 	private long lastShipTime;
-	private long lastAsteroidTime;
 	
 	private Rectangle asteroidExplosion;
 	private Rectangle shipExplosion;
+	private Rectangle enemyShipExplosion;
 	
 	private JLabel shipsValueLabel;
 	private JLabel destroyedValueLabel;
+	private JLabel destroyedEnemyShipsValueLabel;
+	private JLabel levelValueLabel;
+	private JLabel pointsValueLabel;
+	private JLabel bulletsFiredValueLabel;
+	private JLabel bulletsRemainingValueLabel;
+	private JLabel hitMissRatioValueLabel;
 
 	private Random rand;
 	
@@ -66,7 +73,7 @@ public class GameScreen extends JPanel {
 		graphicsMan = new GraphicsManager();
 		
 		// init back buffer image
-		backBuffer = new BufferedImage(500, 400, BufferedImage.TYPE_INT_RGB);
+		backBuffer = new BufferedImage(GameSettings.GAME_FRAME_X_SIZE, GameSettings.GAME_FRAME_Y_SIZE, BufferedImage.TYPE_INT_RGB);
 		g2d = backBuffer.createGraphics();
 	}
 
@@ -75,8 +82,8 @@ public class GameScreen extends JPanel {
 	 */
 	private void initialize() {
 		// set panel properties
-        this.setSize(new Dimension(500, 400));
-        this.setPreferredSize(new Dimension(500, 400));
+        this.setSize(new Dimension(GameSettings.GAME_FRAME_X_SIZE, GameSettings.GAME_FRAME_Y_SIZE));
+        this.setPreferredSize(new Dimension(GameSettings.GAME_FRAME_X_SIZE, GameSettings.GAME_FRAME_Y_SIZE));
         this.setBackground(Color.BLACK);
 	}
 
@@ -95,8 +102,14 @@ public class GameScreen extends JPanel {
 	 */
 	public void updateScreen(){
 		Ship ship = gameLogic.getShip();
-		Asteroid asteroid = gameLogic.getAsteroid();
+		ArrayList<Asteroid> asteroids = gameLogic.getAsteroidList();
+		ArrayList<EnemyShip> enemyShips = gameLogic.getEnemyShipList();
+		ArrayList<ChuckNorris> chuckNorriss = gameLogic.getChuckNorrisList();
 		List<Bullet> bullets = gameLogic.getBullets();
+		List<EnemyBullet> enemyBullets = gameLogic.getEnemyBullets();
+		
+		// always set gameLogic in GameStatus for gameLogic's asteroid list, etc.
+		status.setGameLogic(gameLogic);
 		
 		// set orignal font - for later use
 		if(this.originalFont == null){
@@ -123,11 +136,24 @@ public class GameScreen extends JPanel {
 			drawGameOver();
 			
 			long currentTime = System.currentTimeMillis();
-			// draw the explosions until their time passes
-			if((currentTime - lastAsteroidTime) < NEW_ASTEROID_DELAY){
-				graphicsMan.drawAsteroidExplosion(asteroidExplosion, g2d, this);
+			
+			// draw the explosions until their time passes... for each asteroid
+			for(int i = 0; i < asteroids.size(); i++) {
+				Asteroid asteroid = asteroids.get(i);
+				if((currentTime - asteroid.getLastAsteroidTime()) < GameSettings.NEW_ASTEROID_DELAY){
+					graphicsMan.drawAsteroidExplosion(asteroidExplosion, g2d, this);
+				}
 			}
-			if((currentTime - lastShipTime) < NEW_SHIP_DELAY){
+			
+			// draw the explosions until their time passes... for each enemy ship
+			for(int i = 0; i < enemyShips.size(); i++) {
+				EnemyShip enemyShip = enemyShips.get(i);
+				if((currentTime - enemyShip.getLastEnemyShipTime()) < GameSettings.NEW_ENEMY_SHIP_DELAY) {
+					graphicsMan.drawEnemyShipExplosion(enemyShipExplosion, g2d, this);
+				}
+			}
+			
+			if((currentTime - lastShipTime) < GameSettings.NEW_SHIP_DELAY){
 				graphicsMan.drawShipExplosion(shipExplosion, g2d, this);
 			}
 			return;
@@ -140,32 +166,304 @@ public class GameScreen extends JPanel {
 			return;
 		}
 
-		// draw asteroid
-		if(!status.isNewAsteroid()){
-			// draw the asteroid until it reaches the bottom of the screen
-			if(asteroid.getY() + asteroid.getSpeed() < this.getHeight()){
-				asteroid.translate(0, asteroid.getSpeed());
-				graphicsMan.drawAsteroid(asteroid, g2d, this);
-			}
-			else{
-				asteroid.setLocation(rand.nextInt(getWidth() - asteroid.width), 0);
-			}
-		}
-		else{
-			long currentTime = System.currentTimeMillis();
-			if((currentTime - lastAsteroidTime) > NEW_ASTEROID_DELAY){
-				// draw a new asteroid
-				lastAsteroidTime = currentTime;
-				status.setNewAsteroid(false);
-				asteroid.setLocation(rand.nextInt(getWidth() - asteroid.width), 0);
-			}
-			else{
-				// draw explosion
-				graphicsMan.drawAsteroidExplosion(asteroidExplosion, g2d, this);
-			}
-		}
+		// draw Asteroids
+		drawAsteroids(asteroids);
+		
+		// draw Chuck Norris
+		drawChuckNorriss(chuckNorriss);
+		
+		// drawEnemyShip
+		drawEnemyShip(enemyShips);
 		
 		// draw bullets
+		drawBullets(bullets);
+		
+		// draw enemyBullets
+		drawEnemyBullets(enemyBullets);
+		
+		// draw ship
+		drawShip(ship);
+		
+		// check bullet-asteroid collision
+		checkBulletAsteroidCollision(asteroids, bullets);
+		
+		checkBulletChuckNorrisCollision(chuckNorriss, bullets, enemyBullets);
+		
+		// check bullet-enemyShip collision
+		checkBulletEnemyShipCollision(enemyShips, bullets);
+		
+		// check enemyBullet-ship collision
+		checkShipEnemyBulletCollision(ship, enemyBullets);
+		
+		// check asteroid-ship collision
+		checkAsteroidsShipCollision(asteroids, ship);
+		
+		// check chuck norris - ship collision
+		checkChuckNorrisShipCollision(chuckNorriss, ship);
+		
+		// check ship-enemyShip collision
+		checkShipEnemyShipCollision(ship, enemyShips);
+		
+		// check bullet collisions
+		checkBulletEnemyBulletCollision(bullets, enemyBullets);
+		
+		// update asteroids destroyed label
+		destroyedValueLabel.setText(Long.toString(status.getAsteroidsDestroyed()));
+		
+		// update enemyShip destroyed label
+		destroyedEnemyShipsValueLabel.setText(Long.toString(status.getEnemyShipsDestroyed()));
+		
+		// update ships left label
+		shipsValueLabel.setText(Integer.toString(status.getShipsLeft()));
+		
+		// update level label
+		levelValueLabel.setText(Integer.toString(status.getLevel()));
+		
+		// update points label
+		pointsValueLabel.setText(Long.toString(status.getPoints()));
+		
+		// update bullets fired label
+		bulletsFiredValueLabel.setText(Long.toString(status.getBulletsFired()));
+		
+		// update bullets remaining label only if bullets are limited
+		if(GameSettings.BULLETS_ARE_LIMITED)
+			bulletsRemainingValueLabel.setText(Long.toString(status.getBulletsRemaining()));
+		
+		// update hit-miss ratio
+		if(status.getBulletsFired() > 0) {
+			hitMissRatioValueLabel.setText(String.format("%.2f", status.getHitMissRatio()));
+		}
+		else {
+			hitMissRatioValueLabel.setText(" --");
+		}
+		
+	}
+
+	/**
+	 * Draws the asteroids to the screen
+	 * @param asteroids - the array list of asteroids to be drawn
+	 */
+	private void drawAsteroids(ArrayList<Asteroid> asteroids) {
+		// draw asteroid
+		for(int i = 0; i < asteroids.size(); i++) {
+			Asteroid asteroid = asteroids.get(i);
+			if(!asteroid.isNew()){
+				// draw the asteroid until it reaches the bottom of the screen
+
+				int horizontalTranslation;
+				int verticalTranslation;
+				if(asteroid.getY() + asteroid.getSpeed() < this.getHeight()){	
+
+					// change horizontal displacement speed
+					if(status.getLevel() < GameSettings.LEVEL_TO_MOVE_ASTEROIDS) {
+						horizontalTranslation = 0;
+					} 
+					else if(GameSettings.ASTEROID_SINUSOIDAL_MOVEMENT) {
+						long currentTime = System.currentTimeMillis();
+						double cs = Math.cos(currentTime / 1000.0 + asteroid.getRandomMovementMultiplier());
+						horizontalTranslation = (int)(3*cs + 2*cs*cs*cs);
+					}
+					//else if(GameSettings.ASTEROID_NELIANS_TECATEX_MOVEMENT) {
+					//	horizontalTranslation = asteroid.getHorizontalSpeed() * rand.nextInt();
+					//}
+					else if(asteroid.getHorizontalLocation() < (this.getWidth()/2)) {
+						if(GameSettings.ASTEROID_NELIANS_TECATEX_MOVEMENT)
+							horizontalTranslation = asteroid.getHorizontalSpeed() * (rand.nextInt(asteroid.getDefaultSpeed()) - 1) + 1;
+						else 
+							horizontalTranslation = asteroid.getHorizontalSpeed();
+					}
+					else {
+						if(GameSettings.ASTEROID_NELIANS_TECATEX_MOVEMENT)
+							horizontalTranslation = -asteroid.getHorizontalSpeed() * (rand.nextInt(asteroid.getDefaultSpeed()) - 1) + 1;
+						else
+							horizontalTranslation = -asteroid.getHorizontalSpeed();
+					}
+
+					// change vertical displacement speed
+					if(status.getLevel() < GameSettings.LEVEL_TO_MOVE_ASTEROIDS_2X) {
+						verticalTranslation = asteroid.getSpeed();
+					} else if(status.getLevel() < GameSettings.LEVEL_TO_MOVE_ASTEROIDS_3X) {
+						verticalTranslation = (int)(asteroid.getSpeed() * GameSettings.SPEED_TO_MOVE_ASTEROIDS_2X);
+					} else {
+						verticalTranslation = (int)(asteroid.getSpeed() * GameSettings.SPEED_TO_MOVE_ASTEROIDS_3X);
+					}
+
+					// for sinosoidal path
+					//double cs = Math.cos(currentTime / 1000.0);
+					/*(int) (3*cs + 2*cs*cs*cs) */
+					asteroid.translate(horizontalTranslation, verticalTranslation);
+					graphicsMan.drawAsteroid(asteroid, g2d, this);
+				}
+				else{
+					asteroid.setLocation(rand.nextInt(getWidth() - asteroid.width), 0);
+					asteroid.setHorizontalSpeed(rand.nextInt(asteroid.getSpeed()));
+
+				}
+			}
+			else{
+				long currentTime = System.currentTimeMillis();
+				// check the individual last asteroid's time
+				if((currentTime - asteroid.getLastAsteroidTime()) > GameSettings.NEW_ASTEROID_DELAY){
+					// draw a new asteroid
+					asteroid.setLastAsteroidTime(currentTime);
+					asteroid.isNew(false);
+					asteroid.setLocation(rand.nextInt(getWidth() - asteroid.width), 0);
+				}
+				else{
+					// draw explosion (keep drawing this explosion...)
+					graphicsMan.drawAsteroidExplosion(asteroidExplosion, g2d, this);
+				}
+			}
+		}
+
+	}
+	
+	/**
+	 * This class draws the chuck norris's on the screen
+	 * @param chuckNorriss - the list of chuck norriss to draw
+	 */
+	private void drawChuckNorriss(ArrayList<ChuckNorris> chuckNorriss) {
+		// draw chuck norris
+		for(int i = 0; i < chuckNorriss.size(); i++) {
+			ChuckNorris chuckNorris = chuckNorriss.get(i);
+			if(!chuckNorris.isNew()){
+				// draw the chuck norris until it reaches the bottom of the screen
+
+				int horizontalTranslation;
+				int verticalTranslation;
+				if(chuckNorris.getY() + chuckNorris.getSpeed() < this.getHeight()){	
+
+					// change horizontal displacement speed
+					if(status.getLevel() < GameSettings.LEVEL_TO_MOVE_ASTEROIDS) {
+						horizontalTranslation = 0;
+					} 
+					else if(GameSettings.ASTEROID_SINUSOIDAL_MOVEMENT) {
+						long currentTime = System.currentTimeMillis();
+						double cs = Math.cos(currentTime / 1000.0 + chuckNorris.getRandomMovementMultiplier());
+						horizontalTranslation = (int)(3*cs + 2*cs*cs*cs);
+					}
+					//else if(GameSettings.ASTEROID_NELIANS_TECATEX_MOVEMENT) {
+					//	horizontalTranslation = asteroid.getHorizontalSpeed() * rand.nextInt();
+					//}
+					else if(chuckNorris.getHorizontalLocation() < (this.getWidth()/2)) {
+						if(GameSettings.ASTEROID_NELIANS_TECATEX_MOVEMENT)
+							horizontalTranslation = chuckNorris.getHorizontalSpeed() * (rand.nextInt(chuckNorris.getDefaultSpeed()) - 1) + 1;
+						else 
+							horizontalTranslation = chuckNorris.getHorizontalSpeed();
+					}
+					else {
+						if(GameSettings.ASTEROID_NELIANS_TECATEX_MOVEMENT)
+							horizontalTranslation = -chuckNorris.getHorizontalSpeed() * (rand.nextInt(chuckNorris.getDefaultSpeed()) - 1) + 1;
+						else
+							horizontalTranslation = -chuckNorris.getHorizontalSpeed();
+					}
+
+					// change vertical displacement speed
+					if(status.getLevel() < GameSettings.LEVEL_TO_MOVE_ASTEROIDS_2X) {
+						verticalTranslation = chuckNorris.getSpeed();
+					} else if(status.getLevel() < GameSettings.LEVEL_TO_MOVE_ASTEROIDS_3X) {
+						verticalTranslation = (int)(chuckNorris.getSpeed() * GameSettings.SPEED_TO_MOVE_ASTEROIDS_2X);
+					} else {
+						verticalTranslation = (int)(chuckNorris.getSpeed() * GameSettings.SPEED_TO_MOVE_ASTEROIDS_3X);
+					}
+
+					// for sinosoidal path
+					//double cs = Math.cos(currentTime / 1000.0);
+					/*(int) (3*cs + 2*cs*cs*cs) */
+					chuckNorris.translate(horizontalTranslation, verticalTranslation);
+					graphicsMan.drawChuckNorris(chuckNorris, g2d, this);
+				}
+				else{
+					chuckNorris.setLocation(rand.nextInt(getWidth() - chuckNorris.width), 0);
+					chuckNorris.setHorizontalSpeed(rand.nextInt(chuckNorris.getSpeed()));
+
+				}
+			}
+			else{
+				long currentTime = System.currentTimeMillis();
+				// check the individual last asteroid's time
+				if((currentTime - chuckNorris.getLastAsteroidTime()) > GameSettings.NEW_ASTEROID_DELAY){
+					// draw a new asteroid
+					chuckNorris.setLastAsteroidTime(currentTime);
+					chuckNorris.isNew(false);
+					chuckNorris.setLocation(rand.nextInt(getWidth() - chuckNorris.width), 0);
+				}
+				else{
+					// draw explosion (keep drawing this explosion...)
+					graphicsMan.drawAsteroidExplosion(asteroidExplosion, g2d, this);
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Draws the enemy ships to the screen
+	 * @param enemyShips - the array list of enemy ships to be drawn
+	 */
+	private void drawEnemyShip(ArrayList<EnemyShip> enemyShips) {
+		// draw enemyShip
+		for(int i = 0; i < enemyShips.size(); i++) {
+			EnemyShip enemyShip = enemyShips.get(i);
+			if(!enemyShip.isNew()){
+				// draw the enemyShip until it reaches the bottom of the screen
+
+				int horizontalTranslation;
+				int verticalTranslation;
+				if(enemyShip.getY() + enemyShip.getSpeed() < this.getHeight()){	
+
+					long currentTime = System.currentTimeMillis();
+					double cs = Math.cos(currentTime/1000.0 + enemyShip.getRandomMovementMultiplier());
+
+					if(status.getLevel() < GameSettings.LEVEL_TO_MOVE_ENEMY_SHIP_2X) {
+						verticalTranslation = enemyShip.getSpeed();
+						horizontalTranslation = (int) (3*cs + 2*cs*cs*cs);
+					} else if(status.getLevel() < GameSettings.LEVEL_TO_MOVE_ENEMY_SHIP_3X) {
+						verticalTranslation = (int)(enemyShip.getSpeed() * GameSettings.SPEED_TO_MOVE_ENEMY_SHIP_2X);
+						horizontalTranslation = (int) (3*cs + 2*cs*cs*cs);
+					} else {
+						verticalTranslation = (int)(enemyShip.getSpeed() * GameSettings.SPEED_TO_MOVE_ENEMY_SHIP_3X);
+						horizontalTranslation = (int) (5*cs + 2*cs*cs*cs);
+					}
+
+					enemyShip.translate(horizontalTranslation, verticalTranslation);
+					graphicsMan.drawEnemyShip(enemyShip, g2d, this);
+
+					// fire enemy bullets
+					if((currentTime - enemyShip.getEnemyBulletTime()) > enemyShip.getCooldown()){
+						enemyShip.setEnemyBulletTime(currentTime);
+						gameLogic.fireEnemyBullet(i);
+						enemyShip.changeCooldown();
+					}
+
+				}
+				else{
+					enemyShip.setLocation(rand.nextInt(getWidth() - enemyShip.width), 0);
+					enemyShip.setHorizontalSpeed(rand.nextInt(enemyShip.getSpeed()));
+
+				}
+			}
+			else{
+				long currentTime = System.currentTimeMillis();
+				if((currentTime - enemyShip.getLastEnemyShipTime()) > GameSettings.NEW_ENEMY_SHIP_DELAY){
+					// draw a new enemy ship (plus fired bullet)
+					enemyShip.setLastEnemyShipTime(currentTime);
+					enemyShip.isNew(false);
+					enemyShip.setLocation(rand.nextInt(getWidth() - enemyShip.width), 0);
+					gameLogic.fireEnemyBullet(i);
+				}
+				else{
+					// draw explosion
+					graphicsMan.drawEnemyShipExplosion(enemyShipExplosion, g2d, this);
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Draws the palyer's bullets to the screen
+	 * @param bullets - the list of bullets to be drawn
+	 */
+	private void drawBullets(List<Bullet> bullets) {
 		for(int i=0; i<bullets.size(); i++){
 			Bullet bullet = bullets.get(i);
 			graphicsMan.drawBullet(bullet, g2d, this);
@@ -176,33 +474,30 @@ public class GameScreen extends JPanel {
 				i--;
 			}
 		}
-		
-		// check bullet-asteroid collisions
-		for(int i=0; i<bullets.size(); i++){
-			Bullet bullet = bullets.get(i);
-			if(asteroid.intersects(bullet)){
-				// increase asteroids destroyed count
-				status.setAsteroidsDestroyed(status.getAsteroidsDestroyed() + 1);
-
-				// "remove" asteroid
-		        asteroidExplosion = new Rectangle(
-		        		asteroid.x,
-		        		asteroid.y,
-		        		asteroid.width,
-		        		asteroid.height);
-				asteroid.setLocation(-asteroid.width, -asteroid.height);
-				status.setNewAsteroid(true);
-				lastAsteroidTime = System.currentTimeMillis();
-				
-				// play asteroid explosion sound
-				soundMan.playAsteroidExplosionSound();
-				
-				// remove bullet
-				bullets.remove(i);
-				break;
+	}
+	
+	/**
+	 * Draws the enemy ship's bullets to the screen
+	 * @param enemyBullets - the list of enemy bullets to be drawn
+	 */
+	private void drawEnemyBullets(List<EnemyBullet> enemyBullets) {
+		for(int i=0; i<enemyBullets.size(); i++){
+			EnemyBullet enemyBullet = enemyBullets.get(i);
+			graphicsMan.drawEnemyBullet(enemyBullet, g2d, this);
+			
+			boolean remove = gameLogic.moveEnemyBullet(enemyBullet);
+			if(remove){
+				enemyBullets.remove(i);
+				i--;
 			}
 		}
-		
+	}
+	
+	/**
+	 * Draws the player's ship to the screen
+	 * @param ship - the ship to be drawn
+	 */
+	private void drawShip(Ship ship) {
 		// draw ship
 		if(!status.isNewShip()){
 			// draw it in its current location
@@ -211,7 +506,7 @@ public class GameScreen extends JPanel {
 		else{
 			// draw a new one
 			long currentTime = System.currentTimeMillis();
-			if((currentTime - lastShipTime) > NEW_SHIP_DELAY){
+			if((currentTime - lastShipTime) > GameSettings.NEW_SHIP_DELAY){
 				lastShipTime = currentTime;
 				status.setNewShip(false);
 				ship = gameLogic.newShip(this);
@@ -221,47 +516,270 @@ public class GameScreen extends JPanel {
 				graphicsMan.drawShipExplosion(shipExplosion, g2d, this);
 			}
 		}
-		
-		// check ship-asteroid collisions
-		if(asteroid.intersects(ship)){
-			// decrease number of ships left
-			status.setShipsLeft(status.getShipsLeft() - 1);
-			
-			status.setAsteroidsDestroyed(status.getAsteroidsDestroyed() + 1);
-
-			// "remove" asteroid
-	        asteroidExplosion = new Rectangle(
-	        		asteroid.x,
-	        		asteroid.y,
-	        		asteroid.width,
-	        		asteroid.height);
-			asteroid.setLocation(-asteroid.width, -asteroid.height);
-			status.setNewAsteroid(true);
-			lastAsteroidTime = System.currentTimeMillis();
-			
-			// "remove" ship
-	        shipExplosion = new Rectangle(
-	        		ship.x,
-	        		ship.y,
-	        		ship.width,
-	        		ship.height);
-			ship.setLocation(this.getWidth() + ship.width, -ship.height);
-			status.setNewShip(true);
-			lastShipTime = System.currentTimeMillis();
-			
-			// play ship explosion sound
-			soundMan.playShipExplosionSound();
-			// play asteroid explosion sound
-			soundMan.playAsteroidExplosionSound();
-		}
-		
-		// update asteroids destroyed label
-		destroyedValueLabel.setText(Long.toString(status.getAsteroidsDestroyed()));
-		
-		// update ships left label
-		shipsValueLabel.setText(Integer.toString(status.getShipsLeft()));
 	}
+	
+	/**
+	 * Checks the collisions between the enemy ships and the player's bullets
+	 * @param enemyShips - the list of enemy ships on the screen
+	 * @param bullets - the list of the player's bullets on the screen
+	 */
+	private void checkBulletEnemyShipCollision(ArrayList<EnemyShip> enemyShips, List<Bullet> bullets) {
+		for(int j = 0; j < enemyShips.size(); j++) {
+			EnemyShip enemyShip = enemyShips.get(j);
+			for(int i=0; i<bullets.size(); i++){
+				Bullet bullet = bullets.get(i);
+				if(enemyShip.intersects(bullet)){
+					// increase asteroids destroyed count
+					status.setEnemyShipsDestroyed(status.getEnemyShipsDestroyed() + 1);
 
+					// "remove" enemyShip
+					enemyShipExplosion = new Rectangle(
+							enemyShip.x,
+							enemyShip.y,
+							enemyShip.width,
+							enemyShip.height);
+					enemyShip.setLocation(-enemyShip.width, -enemyShip.height);
+					enemyShip.isNew(true);
+					enemyShip.setLastEnemyShipTime(System.currentTimeMillis());
+
+					// play asteroid explosion sound
+					soundMan.playEnemyShipExplosionSound();
+
+					// remove bullet
+					bullets.remove(i);
+					break;
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Check collisions between chuck norris and bullets
+	 * @param chuckNorriss - list of all chuck norris in screen
+	 * @param bullets - list of player's bullets
+	 */
+	private void checkBulletChuckNorrisCollision(ArrayList<ChuckNorris> chuckNorriss, List<Bullet> bullets, List<EnemyBullet> enemyBullets) {
+		for(int j = 0; j < chuckNorriss.size(); j++) {
+			ChuckNorris chuckNorris = chuckNorriss.get(j);
+			for(int i=0; i<bullets.size(); i++){
+				Bullet bullet = bullets.get(i);
+				if(chuckNorris.intersects(bullet)){
+					// remove bullet
+					bullets.remove(i);
+					enemyBullets.add(new EnemyBullet(chuckNorris));
+					
+					// sound
+					soundMan.playChuckNorrisSound();
+					break;
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Check collisions between the player's bullets and the enemy's bullets.
+	 * @param bullets - list of the player's bullets
+	 * @param enemyBullets - list of the enemy's bullets
+	 */
+	private void checkBulletEnemyBulletCollision(List<Bullet> bullets, List<EnemyBullet> enemyBullets) {
+		for(int j = 0; j < enemyBullets.size(); j++) {
+			EnemyBullet enemyBullet = enemyBullets.get(j);
+			for(int i=0; i<bullets.size(); i++){
+				Bullet bullet = bullets.get(i);
+				if(enemyBullet.intersects(bullet)){
+					// remove bullet
+					bullets.remove(i);
+					enemyBullets.remove(j);
+					break;
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Checks the collisions between the player's ship and the enemy's bullets
+	 * @param ship - the player's ship on the screen
+	 * @param enemyBullets - the list of enemy bullets on the screen
+	 */
+	private void checkShipEnemyBulletCollision(Ship ship, List<EnemyBullet> enemyBullets) {
+		// check enemyBullet-ship collision
+		for(int i=0; i<enemyBullets.size(); i++){
+			EnemyBullet enemyBullet = enemyBullets.get(i);
+			if(ship.intersects(enemyBullet)){
+				// decrease number of ships left
+				status.setShipsLeft(status.getShipsLeft() - 1);
+
+				// "remove" ship
+		        shipExplosion = new Rectangle(
+		        		ship.x,
+		        		ship.y,
+		        		ship.width,
+		        		ship.height);
+				ship.setLocation(this.getWidth() + ship.width, -ship.height);
+				status.setNewShip(true);
+				lastShipTime = System.currentTimeMillis();
+				
+				// play ship explosion sound
+				soundMan.playShipExplosionSound();
+				
+				// remove bullet
+				enemyBullets.remove(i);
+				break;
+			}
+		}
+	}
+	
+	/**
+	 * Checks collisions between the player's ship and the enemy's ships
+	 * @param ship - the player's ship on the screen
+	 * @param enemyShips - the list of enemy ships on the screen
+	 */
+	private void checkShipEnemyShipCollision(Ship ship, ArrayList<EnemyShip> enemyShips) {
+		// check ship-enemyShip collision
+		for(int i = 0; i < enemyShips.size(); i++) {
+			EnemyShip enemyShip = enemyShips.get(i);
+			if(enemyShip.intersects(ship)){
+				// decrease number of ships left
+				status.setShipsLeft(status.getShipsLeft() - 1);
+
+				status.setEnemyShipsDestroyed(status.getEnemyShipsDestroyed() + 1);
+
+				// "remove" enemyShip
+				enemyShipExplosion = new Rectangle(
+						enemyShip.x,
+						enemyShip.y,
+						enemyShip.width,
+						enemyShip.height);
+				enemyShip.setLocation(-enemyShip.width, -enemyShip.height);
+				enemyShip.isNew(true);
+				enemyShip.setLastEnemyShipTime(System.currentTimeMillis());
+
+				// "remove" ship
+				shipExplosion = new Rectangle(
+						ship.x,
+						ship.y,
+						ship.width,
+						ship.height);
+				ship.setLocation(this.getWidth() + ship.width, -ship.height);
+				status.setNewShip(true);
+				lastShipTime = System.currentTimeMillis();
+
+				// play ship explosion sound
+				soundMan.playShipExplosionSound();
+				// play asteroid explosion sound
+				soundMan.playEnemyShipExplosionSound();
+			}
+		}
+	}
+	
+	/**
+	 * Checks collisions between the player's bullets and the asteroids
+	 * @param asteroids - the list of asteroids on the screen
+	 * @param bullets - the list of the player's bullets on the screen
+	 */
+	private void checkBulletAsteroidCollision(ArrayList<Asteroid> asteroids, List<Bullet> bullets) {
+		// check bullet-asteroid collisions for each asteroid
+		for(int j = 0; j < asteroids.size(); j++) {
+			Asteroid asteroid = asteroids.get(j);
+			for(int i=0; i<bullets.size(); i++){
+				Bullet bullet = bullets.get(i);
+				if(asteroid.intersects(bullet)){
+					// increase asteroids destroyed count
+					status.setAsteroidsDestroyed(status.getAsteroidsDestroyed() + 1);
+
+					// "remove" asteroid
+					asteroidExplosion = new Rectangle(
+							asteroid.x,
+							asteroid.y,
+							asteroid.width,
+							asteroid.height);
+					asteroid.setLocation(-asteroid.width, -asteroid.height);
+					asteroid.isNew(true);
+					asteroid.setLastAsteroidTime(System.currentTimeMillis());
+
+					// play asteroid explosion sound
+					soundMan.playAsteroidExplosionSound();
+
+					// remove bullet
+					bullets.remove(i);
+					break;
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Checks the collisions between the asteroids and the player's ship
+	 * @param asteroids - the list of asteroids on the screen
+	 * @param ship - the player's ship on the screen
+	 */
+	private void checkAsteroidsShipCollision(ArrayList<Asteroid> asteroids, Ship ship) {
+		// check ship-asteroid collisions for each asteroid
+		for(int i = 0; i < asteroids.size(); i++) {
+			Asteroid asteroid = asteroids.get(i);
+			if(asteroid.intersects(ship)){
+				// decrease number of ships left
+				status.setShipsLeft(status.getShipsLeft() - 1);
+
+				status.setAsteroidsDestroyed(status.getAsteroidsDestroyed() + 1);
+
+				// "remove" asteroid
+				asteroidExplosion = new Rectangle(
+						asteroid.x,
+						asteroid.y,
+						asteroid.width,
+						asteroid.height);
+				asteroid.setLocation(-asteroid.width, -asteroid.height);
+				asteroid.isNew(true);
+				asteroid.setLastAsteroidTime(System.currentTimeMillis());
+
+				// "remove" ship
+				shipExplosion = new Rectangle(
+						ship.x,
+						ship.y,
+						ship.width,
+						ship.height);
+				ship.setLocation(this.getWidth() + ship.width, -ship.height);
+				status.setNewShip(true);
+				lastShipTime = System.currentTimeMillis();
+
+				// play ship explosion sound
+				soundMan.playShipExplosionSound();
+				// play asteroid explosion sound
+				soundMan.playAsteroidExplosionSound();
+			}
+		}
+	}
+	
+	/**
+	 * Check collisions between chuck norris and the player's ship
+	 * @param chuckNorriss - the chuck norris list
+	 * @param ship - the player's ship
+	 */
+	private void checkChuckNorrisShipCollision(ArrayList<ChuckNorris> chuckNorriss, Ship ship) {
+		// check ship-asteroid collisions for each asteroid
+		for(int i = 0; i < chuckNorriss.size(); i++) {
+			ChuckNorris chuckNorris = chuckNorriss.get(i);
+			if(chuckNorris.intersects(ship)){
+				// decrease number of ships left
+				status.setShipsLeft(status.getShipsLeft() - 1);
+
+				// "remove" ship
+				shipExplosion = new Rectangle(
+						ship.x,
+						ship.y,
+						ship.width,
+						ship.height);
+				ship.setLocation(this.getWidth() + ship.width, -ship.height);
+				status.setNewShip(true);
+				lastShipTime = System.currentTimeMillis();
+
+				// play chuck norris explosion sound
+				soundMan.playChuckNorrisExplosionSound();
+			}
+		}
+	}
+	
 	/**
 	 * Draws the "Game Over" message.
 	 */
@@ -353,6 +871,21 @@ public class GameScreen extends JPanel {
 		strX = (this.getWidth() - strWidth)/2;
 		strY = strY + 16;
 		g2d.drawString(exitGameStr, strX, strY);
+		
+		// by team machete
+		fm = g2d.getFontMetrics();
+		String teamMachete = "By: Team Machete";
+		strWidth = fm.stringWidth(teamMachete);
+		strX = (this.getWidth() - strWidth)/2;
+		strY = strY + 16;
+		g2d.drawString(teamMachete, strX, strY);
+		
+		fm = g2d.getFontMetrics();
+		String names = "Samuel Rodriguez & Nelian Colon";
+		strWidth = fm.stringWidth(names);
+		strX = (this.getWidth() - strWidth)/2;
+		strY = strY + 16;
+		g2d.drawString(names, strX, strY);
 	}
 	
 	/**
@@ -366,16 +899,31 @@ public class GameScreen extends JPanel {
 	 * Prepare screen for a new game.
 	 */
 	public void doNewGame(){		
-		lastAsteroidTime = -NEW_ASTEROID_DELAY;
-		lastShipTime = -NEW_SHIP_DELAY;
+		// init all asteroid times is not necessary
+		lastShipTime = -GameSettings.NEW_SHIP_DELAY;
 				
 		bigFont = originalFont;
 		biggestFont = null;
 				
         // set labels' text
-		shipsValueLabel.setForeground(Color.BLACK);
+		shipsValueLabel.setForeground(Color.WHITE);
 		shipsValueLabel.setText(Integer.toString(status.getShipsLeft()));
 		destroyedValueLabel.setText(Long.toString(status.getAsteroidsDestroyed()));
+		pointsValueLabel.setText(Long.toString(status.getPoints()));
+		levelValueLabel.setText(Integer.toString(status.getLevel()));
+		destroyedEnemyShipsValueLabel.setText(Long.toString(status.getEnemyShipsDestroyed()));
+		bulletsFiredValueLabel.setText(Long.toString(status.getBulletsFired()));
+		if(GameSettings.BULLETS_ARE_LIMITED)
+			bulletsRemainingValueLabel.setText(Long.toString(status.getBulletsRemaining()));
+	
+		// update hit-miss ratio
+		if(status.getBulletsFired() > 0) {
+			hitMissRatioValueLabel.setText(String.format("%.2f", status.getHitMissRatio()));
+		}
+		else {
+			hitMissRatioValueLabel.setText(" --");
+		}
+		
 	}
 
 	/**
@@ -402,6 +950,54 @@ public class GameScreen extends JPanel {
 	 */
 	public void setDestroyedValueLabel(JLabel destroyedValueLabel) {
 		this.destroyedValueLabel = destroyedValueLabel;
+	}
+	
+	/**
+	 * Sets the label that displays the value of the enemy ships destroyed
+	 * @param destroyedEnemyShipsValueLabel - the label to set
+	 */
+	public void setDestroyedEnemyShipsValueLabel(JLabel destroyedEnemyShipsValueLabel) {
+		this.destroyedEnemyShipsValueLabel = destroyedEnemyShipsValueLabel;
+	}
+	
+	/**
+	 * Sets the label that displays the value of the points the player has
+	 * @param pointsValueLabel - the label to be set
+	 */
+	public void setPointsValueLabel(JLabel pointsValueLabel) {
+		this.pointsValueLabel = pointsValueLabel;
+	}
+	
+	/**
+	 * sets the label that displays the value of the level the player is in
+	 * @param levelValueLabel - the label to be set
+	 */
+	public void setLevelValueLabel(JLabel levelValueLabel) {
+		this.levelValueLabel = levelValueLabel;
+	}
+	
+	/**
+	 * sets the label that displays the value of the bullets that the player has fired
+	 * @param bulletsFiredValueLabel - the label to be set
+	 */
+	public void setBulletsFiredValueLabel(JLabel bulletsFiredValueLabel) {
+		this.bulletsFiredValueLabel = bulletsFiredValueLabel;
+	}
+	
+	/**
+	 * sets the label that displays the value of the bullets remaining
+	 * @param bulletsRemainingValueLabel - the label to set
+	 */
+	public void setBulletsRemainingValueLabel(JLabel bulletsRemainingValueLabel) {
+		this.bulletsRemainingValueLabel = bulletsRemainingValueLabel;
+	}
+	
+	/**
+	 * sets the label that displyas the value of the hit/miss ratio
+	 * @param hitMissRatioValueLabel - the label to set
+	 */
+	public void setHitMissRatioValueLabel(JLabel hitMissRatioValueLabel) {
+		this.hitMissRatioValueLabel = hitMissRatioValueLabel;
 	}
 	
 	/**
